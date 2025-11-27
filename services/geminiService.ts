@@ -32,7 +32,7 @@ const ensureProModelApiKey = async (): Promise<GoogleGenerativeAI> => {
     console.warn("Could not check for aistudio API key", e);
   }
 
-  const key = process.env.API_KEY;
+  const key = import.meta.env.VITE_API_KEY;
   console.log("0------", key);
 
   if (!key) {
@@ -45,7 +45,7 @@ const ensureProModelApiKey = async (): Promise<GoogleGenerativeAI> => {
 };
 
 const getAiClient = (): GoogleGenerativeAI => {
-  const key = process.env.API_KEY;
+  const key = import.meta.env.VITE_API_KEY;
   console.log("0------", key);
   if (!key) {
     throw new Error("API_KEY environment variable not set.");
