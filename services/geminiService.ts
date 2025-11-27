@@ -14,24 +14,6 @@ import { addWatermark } from "../utils/imageWatermark";
  * but implement them using @google/generative-ai public SDK usage patterns.
  */
 
-const resolveApiKey = (): string | undefined => {
-  // Prefer server env API_KEY (keeps behavior similar to your original)
-  if (typeof process !== "undefined" && process.env?.API_KEY)
-    return process.env.API_KEY;
-  // Vite / Next alternatives (optional)
-  // @ts-ignore
-  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_KEY)
-    return import.meta.env.VITE_API_KEY;
-  // @ts-ignore
-  if (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_API_KEY)
-    return process.env.NEXT_PUBLIC_API_KEY;
-  // browser global fallback
-  // @ts-ignore
-  if (typeof window !== "undefined" && (window as any).__AI_API_KEY__)
-    return (window as any).__AI_API_KEY__;
-  return undefined;
-};
-
 const ensureProModelApiKey = async (): Promise<GoogleGenerativeAI> => {
   try {
     // If running inside ai.studio / aistudio, try to prompt key selection (keeps original behavior)
@@ -50,7 +32,8 @@ const ensureProModelApiKey = async (): Promise<GoogleGenerativeAI> => {
     console.warn("Could not check for aistudio API key", e);
   }
 
-  const key = resolveApiKey();
+  const key = process.env.API_KEY;
+
   if (!key) {
     throw new Error(
       "API_KEY environment variable not set. Please select a key from a paid GCP project. See ai.google.dev/gemini-api/docs/billing"
@@ -61,7 +44,7 @@ const ensureProModelApiKey = async (): Promise<GoogleGenerativeAI> => {
 };
 
 const getAiClient = (): GoogleGenerativeAI => {
-  const key = resolveApiKey();
+  const key = process.env.API_KEY;
   if (!key) {
     throw new Error("API_KEY environment variable not set.");
   }
@@ -910,7 +893,7 @@ export async function generateVideoFromImage(
           "Video generation succeeded but no download link was found."
         );
 
-      const resp = await fetch(`${downloadLink}&key=${resolveApiKey()}`);
+      const resp = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
       if (!resp.ok) {
         const errorText = await resp.text();
         if (errorText.includes("Requested entity was not found.")) {
