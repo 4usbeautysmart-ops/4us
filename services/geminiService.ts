@@ -532,8 +532,8 @@ export async function generateHairstylistReport(
   const ai = getAiClient();
   // get model wrapper
   const model = ai.getGenerativeModel
-    ? ai.getGenerativeModel({ model: "gemini-3-pro-preview" })
-    : (ai as any).models?.get?.("gemini-3-pro-preview") ?? ai;
+    ? ai.getGenerativeModel({ model: "gemini-2.0-flash-vision" })
+    : (ai as any).models?.get?.("gemini-2.0-flash-vision") ?? ai;
 
   const clientBase64 = await fileToBase64(clientImageFile);
   const referenceBase64 = await fileToBase64(referenceImageFile);
@@ -583,7 +583,7 @@ Sua resposta final deve ser um único objeto JSON estruturado, seguindo o schema
     ],
     generationConfig: {
       responseMimeType: "application/json",
-      responseSchema: hairstylistReportSchema,
+      // responseSchema: hairstylistReportSchema,
       temperature: 0.0,
       thinkingConfig: { thinkingBudget: 32768 },
     },
