@@ -264,11 +264,20 @@ export default function App({ onLogout, userProfile }: AppProps) {
     resetHistory();
 
     try {
-      const report = await generateHairstylistReport(
-        clientImageForHairstylist,
-        referenceImageForHairstylist,
-        brandForHairstylist
-      );
+      const formData = new FormData();
+      formData.append("clientImage", clientImageForHairstylist);
+      formData.append("referenceImage", referenceImageForHairstylist);
+      formData.append("brand", brandForHairstylist);
+
+      const report = await fetch("/api/generate-hairstylist", {
+        method: "POST",
+        body: formData,
+      });
+      // const report = await generateHairstylistReport(
+      //   clientImageForHairstylist,
+      //   referenceImageForHairstylist,
+      //   brandForHairstylist
+      // );
       setHairstylistReport(report);
       setLoadingMessage("Criando simulação de imagem realista...");
 
