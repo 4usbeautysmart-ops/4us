@@ -585,7 +585,7 @@ Sua resposta final deve ser um único objeto JSON estruturado, seguindo o schema
       responseMimeType: "application/json",
       // responseSchema: hairstylistReportSchema,
       temperature: 0.0,
-      thinkingConfig: { thinkingBudget: 32768 },
+      thinkingConfig: { thinkingBudget: 20000 },
     },
   };
 
