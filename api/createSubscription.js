@@ -1,27 +1,26 @@
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
-export default async function handler(req, res) {
-  console.log("---- CHEGOU NA API ----");
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Método não permitido" });
-  }
-
-  const { userId, userEmail, planType } = req.body;
-
-  if (!userId || !userEmail || !planType) {
-    return res.status(400).json({ error: "Dados insuficientes." });
-  }
-
-  const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
-
-  if (!ACCESS_TOKEN) {
-    console.log("❌ MP_ACCESS_TOKEN não configurado");
-    return res.status(500).json({ error: "MP_ACCESS_TOKEN não configurado." });
-  }
+export async function POST(req) {
+  console.log("---- CHEGOU NA API (Route Handler) ----");
 
   try {
-    // Cliente Mercado Pago (SDK nova)
+    const { userId, userEmail, planType } = await req.json();
+
+    if (!userId || !userEmail || !planType) {
+      return Response.json({ error: "Dados insuficientes." }, { status: 400 });
+    }
+
+    const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
+
+    if (!ACCESS_TOKEN) {
+      console.log("❌ MP_ACCESS_TOKEN não configurado");
+      return Response.json(
+        { error: "MP_ACCESS_TOKEN não configurado." },
+        { status: 500 }
+      );
+    }
+
+    // Cliente Mercado Pago
     const client = new MercadoPagoConfig({
       accessToken: ACCESS_TOKEN,
     });
@@ -62,11 +61,14 @@ export default async function handler(req, res) {
 
     console.log("Preference criada com sucesso!");
 
-    return res.status(200).json({
+    return Response.json({
       checkoutUrl: resposta.init_point,
     });
   } catch (err) {
     console.error("🔥 Erro Mercado Pago:", err);
-    return res.status(500).json({ error: "Falha ao criar preferência." });
+    return Response.json(
+      { error: "Falha ao criar preferência." },
+      { status: 500 }
+    );
   }
 }
