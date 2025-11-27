@@ -33,6 +33,7 @@ const ensureProModelApiKey = async (): Promise<GoogleGenerativeAI> => {
   }
 
   const key = process.env.API_KEY;
+  console.log("0------", key);
 
   if (!key) {
     throw new Error(
