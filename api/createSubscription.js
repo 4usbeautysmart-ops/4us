@@ -12,6 +12,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Dados insuficientes." });
   }
 
+  //token
   const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
   if (!ACCESS_TOKEN) {
