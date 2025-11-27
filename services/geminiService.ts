@@ -583,7 +583,7 @@ Sua resposta final deve ser um único objeto JSON estruturado, seguindo o schema
     ],
     generationConfig: {
       responseMimeType: "application/json",
-      // responseSchema: hairstylistReportSchema,
+      responseSchema: hairstylistReportSchema,
       temperature: 0.0,
       thinkingConfig: { thinkingBudget: 20000 },
     },
