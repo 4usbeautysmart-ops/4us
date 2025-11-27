@@ -532,8 +532,8 @@ export async function generateHairstylistReport(
   const ai = getAiClient();
   // get model wrapper
   const model = ai.getGenerativeModel
-    ? ai.getGenerativeModel({ model: "gemini-2.0-flash-vision" })
-    : (ai as any).models?.get?.("gemini-2.0-flash-vision") ?? ai;
+    ? ai.getGenerativeModel({ model: "gemini-2.5-flash" })
+    : (ai as any).models?.get?.("gemini-2.5-flash") ?? ai;
 
   const clientBase64 = await fileToBase64(clientImageFile);
   const referenceBase64 = await fileToBase64(referenceImageFile);
