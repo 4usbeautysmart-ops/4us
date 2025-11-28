@@ -24,20 +24,23 @@ const ensureProModelApiKey = async (): Promise<GoogleGenAI> => {
     console.warn("Could not check for aistudio API key", e);
   }
   // Create a new instance right before the call to ensure the latest key is used.
-  if (!process.env.API_KEY) {
+  if (!import.meta.env.VITE_API_KEY) {
     throw new Error(
       "API_KEY environment variable not set. Please select a key from a paid GCP project. You can find more information at ai.google.dev/gemini-api/docs/billing"
     );
   }
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 };
 
 const getAiClient = () => {
-  console.log("Using API Key:", process.env.API_KEY ? "SET" : "NOT SET");
-  if (!process.env.API_KEY) {
+  console.log(
+    "Using API Key:",
+    import.meta.env.VITE_API_KEY ? "SET" : "NOT SET"
+  );
+  if (!import.meta.env.VITE_API_KEY) {
     throw new Error("API_KEY environment variable not set.");
   }
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 };
 
 const hairstylistReportSchema = {
