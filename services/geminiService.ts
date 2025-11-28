@@ -33,6 +33,7 @@ const ensureProModelApiKey = async (): Promise<GoogleGenAI> => {
 };
 
 const getAiClient = () => {
+  console.log("Using API Key:", process.env.API_KEY ? "SET" : "NOT SET");
   if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set.");
   }
