@@ -1,5 +1,5 @@
-// src/services/genaiService.ts
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
+import type { GenerateContentResponse, Chat } from "@google/genai";
 import type {
   HairstylistReport,
   ColoristReport,
@@ -8,54 +8,36 @@ import type {
 import { fileToBase64 } from "../utils/fileUtils";
 import { addWatermark } from "../utils/imageWatermark";
 
-/**
- * Helpers to create/get client.
- * We keep the original function names getAiClient and ensureProModelApiKey
- * but implement them using @google/generative-ai public SDK usage patterns.
- */
-
-const ensureProModelApiKey = async (): Promise<GoogleGenerativeAI> => {
+// This function checks for and prompts the user to select an API key for Pro models like Veo and gemini-3-pro-image.
+const ensureProModelApiKey = async (): Promise<GoogleGenAI> => {
   try {
-    // If running inside ai.studio / aistudio, try to prompt key selection (keeps original behavior)
-    // @ts-ignore
-    if (typeof window !== "undefined" && (window as any).aistudio) {
-      // @ts-ignore
-      const studio = (window as any).aistudio;
-      if (typeof studio.hasSelectedApiKey === "function") {
-        const hasKey = await studio.hasSelectedApiKey();
-        if (!hasKey && typeof studio.openSelectKey === "function") {
-          await studio.openSelectKey();
-        }
+    if (
+      window.aistudio &&
+      typeof window.aistudio.hasSelectedApiKey === "function"
+    ) {
+      const hasKey = await window.aistudio.hasSelectedApiKey();
+      if (!hasKey) {
+        await window.aistudio.openSelectKey();
       }
     }
   } catch (e) {
     console.warn("Could not check for aistudio API key", e);
   }
-
-  const key = import.meta.env.VITE_API_KEY;
-  console.log("0------", key);
-
-  if (!key) {
+  // Create a new instance right before the call to ensure the latest key is used.
+  if (!process.env.API_KEY) {
     throw new Error(
-      "API_KEY environment variable not set. Please select a key from a paid GCP project. See ai.google.dev/gemini-api/docs/billing"
+      "API_KEY environment variable not set. Please select a key from a paid GCP project. You can find more information at ai.google.dev/gemini-api/docs/billing"
     );
   }
-  // new client instance each time to respect key rotation
-  return new GoogleGenerativeAI(key);
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
-const getAiClient = (): GoogleGenerativeAI => {
-  const key = import.meta.env.VITE_API_KEY;
-  console.log("0------", key);
-  if (!key) {
+const getAiClient = () => {
+  if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set.");
   }
-  return new GoogleGenerativeAI(key);
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
-
-/* -------------------------
-   Schemas (kept exactly as you provided)
-   ------------------------- */
 
 const hairstylistReportSchema = {
   type: "OBJECT",
@@ -283,7 +265,7 @@ const coloristReportSchema = {
       type: "ARRAY",
       items: { type: "STRING" },
       description:
-        "Lista detalhada de produtos necessários para o procedimento em salão. Seja específico, usando nomes de linhas de produtos se possible. Ex: 'Pó descolorante BlondorPlex', 'Oxidante Welloxon Perfect 20 vol (6%)', 'Tonalizante Color Touch 8/71'.",
+        "Lista detalhada de produtos necessários para o procedimento em salão. Seja específico, usando nomes de linhas de produtos se possível. Ex: 'Pó descolorante BlondorPlex', 'Oxidante Welloxon Perfect 20 vol (6%)', 'Tonalizante Color Touch 8/71'.",
     },
     mechasTechnique: {
       type: "OBJECT",
@@ -520,21 +502,12 @@ const visagismReportSchema = {
   ],
 };
 
-/* -------------------------
-   Functions (preserve names + behavior)
-   ------------------------- */
-
 export async function generateHairstylistReport(
   clientImageFile: File,
   referenceImageFile: File,
   brand: string
 ): Promise<HairstylistReport> {
   const ai = getAiClient();
-  // get model wrapper
-  const model = ai.getGenerativeModel
-    ? ai.getGenerativeModel({ model: "gemini-3-pro-preview" })
-    : (ai as any).models?.get?.("gemini-3-pro-preview") ?? ai;
-
   const clientBase64 = await fileToBase64(clientImageFile);
   const referenceBase64 = await fileToBase64(referenceImageFile);
 
@@ -576,52 +549,18 @@ export async function generateHairstylistReport(
 Sua resposta final deve ser um único objeto JSON estruturado, seguindo o schema fornecido.`,
   };
 
-  // call model.generateContent using the SDK pattern
-  const payload = {
-    contents: [
-      { role: "user", parts: [clientImagePart, referenceImagePart, textPart] },
-    ],
-    generationConfig: {
+  const response: GenerateContentResponse = await ai.models.generateContent({
+    model: "gemini-3-pro-preview",
+    contents: { parts: [clientImagePart, referenceImagePart, textPart] },
+    config: {
       responseMimeType: "application/json",
       responseSchema: hairstylistReportSchema,
-      temperature: 0.0,
       thinkingConfig: { thinkingBudget: 32768 },
     },
-  };
+  });
 
-  const response: any = await (model.generateContent
-    ? model.generateContent(payload)
-    : (ai as any).models.generateContent
-    ? (ai as any).models.generateContent(payload)
-    : Promise.reject(
-        new Error("SDK does not support generateContent on this object")
-      ));
-
-  // robust extraction of JSON text
-  let jsonStr: string | undefined;
-  if (typeof response.text === "function") {
-    jsonStr = await response.text();
-  } else if (typeof response.text === "string") {
-    jsonStr = response.text;
-  } else if (response?.candidates?.[0]?.content?.parts) {
-    // search for a text part
-    for (const p of response.candidates[0].content.parts) {
-      if (p.text) {
-        jsonStr = p.text;
-        break;
-      }
-    }
-  } else if (response?.output?.[0]?.content) {
-    const c = response.output[0].content.find(
-      (x: any) => x.type === "output_text" || x.text
-    );
-    if (c) jsonStr = c.text || (typeof c === "string" ? c : undefined);
-  }
-
-  if (!jsonStr) throw new Error("No JSON text returned from model.");
-
-  const trimmed = typeof jsonStr === "string" ? jsonStr.trim() : jsonStr;
-  return JSON.parse(trimmed) as HairstylistReport;
+  const jsonStr = response.text.trim();
+  return JSON.parse(jsonStr) as HairstylistReport;
 }
 
 export async function editImageWithText(
@@ -629,35 +568,28 @@ export async function editImageWithText(
   prompt: string
 ): Promise<string> {
   const ai = getAiClient();
-  const model = ai.getGenerativeModel
-    ? ai.getGenerativeModel({ model: "gemini-2.5-flash-image" })
-    : (ai as any);
-
-  const imageData = base64Image.includes(",")
-    ? base64Image.split(",")[1]
-    : base64Image;
+  const imageData = base64Image.split(",")[1];
   const mimeType = base64Image.match(/data:(.*);base64,/)?.[1] || "image/jpeg";
 
-  const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { inlineData: { data: imageData, mimeType }, text: undefined },
-          { text: prompt },
-        ],
-      },
-    ],
-  };
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-image",
+    contents: {
+      parts: [
+        {
+          inlineData: {
+            data: imageData,
+            mimeType: mimeType,
+          },
+        },
+        {
+          text: prompt,
+        },
+      ],
+    },
+  });
 
-  const response: any = await (model.generateContent
-    ? model.generateContent(payload)
-    : (ai as any).models.generateContent(payload));
-
-  // try to find inlineData inside candidates
-  const candidatesParts = response?.candidates?.[0]?.content?.parts ?? [];
-  for (const part of candidatesParts) {
-    if (part.inlineData && part.inlineData.data) {
+  for (const part of response.candidates[0].content.parts) {
+    if (part.inlineData) {
       const base64ImageBytes: string = part.inlineData.data;
       const generatedImageUrl = `data:image/png;base64,${base64ImageBytes}`;
       try {
@@ -665,28 +597,10 @@ export async function editImageWithText(
         return watermarkedImage;
       } catch (e) {
         console.error("Watermarking failed, returning original image.", e);
-        return generatedImageUrl;
+        return generatedImageUrl; // Fallback to the original image if watermarking fails
       }
     }
   }
-
-  // fallback: maybe response.text() contains a data URL
-  let textResp: string | undefined;
-  if (typeof response.text === "function") textResp = await response.text();
-  else if (typeof response.text === "string") textResp = response.text;
-
-  if (textResp) {
-    const found = textResp.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
-    if (found) {
-      try {
-        const wm = await addWatermark(found[0]);
-        return wm;
-      } catch (e) {
-        return found[0];
-      }
-    }
-  }
-
   throw new Error("Não foi possível editar a imagem.");
 }
 
@@ -696,9 +610,6 @@ export async function generateColoristReport(
   cosmeticsBrand: string
 ): Promise<{ report: ColoristReport; tryOnImage: string }> {
   const ai = getAiClient();
-  const model = ai.getGenerativeModel
-    ? ai.getGenerativeModel({ model: "gemini-3-pro-preview" })
-    : (ai as any);
   const clientImageBase64 = await fileToBase64(clientImageFile);
 
   const clientImagePart = {
@@ -708,7 +619,7 @@ export async function generateColoristReport(
     },
   };
 
-  const inspirationParts: any[] = [];
+  const inspirationParts = [];
   let inspirationText = "";
 
   if (inspiration.type === "image") {
@@ -748,42 +659,26 @@ export async function generateColoristReport(
 Siga rigorosamente o schema JSON para estruturar sua resposta.`,
   };
 
-  const payload = {
-    contents: [
-      { role: "user", parts: [clientImagePart, ...inspirationParts, textPart] },
-    ],
-    generationConfig: {
+  // 1. Generate the technical plan and the image prompt
+  const reportResponse = await ai.models.generateContent({
+    model: "gemini-3-pro-preview",
+    contents: { parts: [clientImagePart, ...inspirationParts, textPart] },
+    config: {
       responseMimeType: "application/json",
       responseSchema: coloristReportSchema,
-      temperature: 0.0,
       thinkingConfig: { thinkingBudget: 32768 },
     },
-  };
+  });
 
-  const reportResponse: any = await (model.generateContent
-    ? model.generateContent(payload)
-    : (ai as any).models.generateContent(payload));
-  let jsonStr: string | undefined;
-  if (typeof reportResponse.text === "function")
-    jsonStr = await reportResponse.text();
-  else if (typeof reportResponse.text === "string")
-    jsonStr = reportResponse.text;
-  else if (reportResponse?.candidates?.[0]?.content?.parts) {
-    for (const p of reportResponse.candidates[0].content.parts) {
-      if (p.text) {
-        jsonStr = p.text;
-        break;
-      }
-    }
-  }
-
-  if (!jsonStr) throw new Error("No JSON returned for colorist report.");
+  const jsonStr = reportResponse.text.trim();
   const report = JSON.parse(jsonStr) as ColoristReport;
 
+  // 2. Generate the try-on image using the prompt from the report
   const tryOnImage = await editImageWithText(
     `data:${clientImageFile.type};base64,${clientImageBase64}`,
     report.tryOnImagePrompt
   );
+
   return { report, tryOnImage };
 }
 
@@ -791,9 +686,6 @@ export async function generateVisagismReport(
   clientImageFile: File
 ): Promise<VisagismReport> {
   const ai = getAiClient();
-  const model = ai.getGenerativeModel
-    ? ai.getGenerativeModel({ model: "gemini-3-pro-preview" })
-    : (ai as any);
   const clientBase64 = await fileToBase64(clientImageFile);
 
   const clientImagePart = {
@@ -817,32 +709,17 @@ export async function generateVisagismReport(
 Sua resposta final deve ser um único objeto JSON estruturado, seguindo rigorosamente o schema fornecido.`,
   };
 
-  const payload = {
-    contents: [{ role: "user", parts: [clientImagePart, textPart] }],
-    generationConfig: {
+  const response: GenerateContentResponse = await ai.models.generateContent({
+    model: "gemini-3-pro-preview",
+    contents: { parts: [clientImagePart, textPart] },
+    config: {
       responseMimeType: "application/json",
       responseSchema: visagismReportSchema,
-      temperature: 0.0,
       thinkingConfig: { thinkingBudget: 32768 },
     },
-  };
+  });
 
-  const response: any = await (model.generateContent
-    ? model.generateContent(payload)
-    : (ai as any).models.generateContent(payload));
-  let jsonStr: string | undefined;
-  if (typeof response.text === "function") jsonStr = await response.text();
-  else if (typeof response.text === "string") jsonStr = response.text;
-  else if (response?.candidates?.[0]?.content?.parts) {
-    for (const p of response.candidates[0].content.parts) {
-      if (p.text) {
-        jsonStr = p.text;
-        break;
-      }
-    }
-  }
-
-  if (!jsonStr) throw new Error("No JSON returned for visagism report.");
+  const jsonStr = response.text.trim();
   return JSON.parse(jsonStr) as VisagismReport;
 }
 
@@ -851,138 +728,71 @@ export async function generateVideoFromImage(
   prompt: string
 ): Promise<string> {
   const ai = await ensureProModelApiKey();
-  // try to use the SDK video helper if present
   const base64Image = await fileToBase64(imageFile);
 
-  if (
-    (ai as any).models &&
-    typeof (ai as any).models.generateVideos === "function"
-  ) {
-    try {
-      // @ts-ignore
-      let operation: any = await (ai as any).models.generateVideos({
-        model: "veo-3.1-fast-generate-preview",
-        prompt,
-        image: {
-          imageBytes: base64Image,
-          mimeType: imageFile.type,
-        },
-        config: {
-          numberOfVideos: 1,
-          resolution: "720p",
-          aspectRatio: "16:9",
-        },
-      });
+  let operation = await ai.models.generateVideos({
+    model: "veo-3.1-fast-generate-preview",
+    prompt: prompt,
+    image: {
+      imageBytes: base64Image,
+      mimeType: imageFile.type,
+    },
+    config: {
+      numberOfVideos: 1,
+      resolution: "720p",
+      aspectRatio: "16:9",
+    },
+  });
 
-      // poll until done (SDK may return operation-like object)
-      while (!operation.done) {
-        await new Promise((resolve) => setTimeout(resolve, 10000));
-        if (
-          (ai as any).operations &&
-          typeof (ai as any).operations.getVideosOperation === "function"
-        ) {
-          operation = await (ai as any).operations.getVideosOperation({
-            operation,
-          });
-        } else {
-          break;
-        }
-      }
+  while (!operation.done) {
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+    operation = await ai.operations.getVideosOperation({
+      operation: operation,
+    });
+  }
 
-      const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-      if (!downloadLink)
-        throw new Error(
-          "Video generation succeeded but no download link was found."
-        );
+  const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+  if (!downloadLink) {
+    throw new Error(
+      "Video generation succeeded but no download link was found."
+    );
+  }
 
-      const resp = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-      if (!resp.ok) {
-        const errorText = await resp.text();
-        if (errorText.includes("Requested entity was not found.")) {
-          throw new Error(
-            "API Key not found or invalid. Please try selecting your key again. See ai.google.dev/gemini-api/docs/billing"
-          );
-        }
-        throw new Error(`Failed to download video: ${resp.statusText}`);
-      }
-      const videoBlob = await resp.blob();
-      return URL.createObjectURL(videoBlob);
-    } catch (err) {
-      console.error("Video generation error:", err);
-      throw err;
+  const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+  if (!response.ok) {
+    const errorText = await response.text();
+    if (errorText.includes("Requested entity was not found.")) {
+      throw new Error(
+        "API Key not found or invalid. Please try selecting your key again. You can find more information about billing at ai.google.dev/gemini-api/docs/billing"
+      );
     }
+    throw new Error(`Failed to download video: ${response.statusText}`);
   }
-
-  // fallback: try to call generateContent on a video-capable model (less common)
-  try {
-    const model = (ai as any).getGenerativeModel
-      ? (ai as any).getGenerativeModel({
-          model: "veo-3.1-fast-generate-preview",
-        })
-      : (ai as any);
-    const response = await (model.generateContent
-      ? model.generateContent({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { text: prompt },
-                { inlineData: { data: base64Image, mimeType: imageFile.type } },
-              ],
-            },
-          ],
-        })
-      : Promise.reject(new Error("No video generate APIs available")));
-    const text =
-      typeof response.text === "function"
-        ? await response.text()
-        : response.text;
-    const match = String(text).match(/https?:\/\/\S+\.mp4\S*/);
-    if (match) return match[0];
-    throw new Error("No video link returned by model fallback.");
-  } catch (err) {
-    console.error("Video fallback failed:", err);
-    throw err;
-  }
+  const videoBlob = await response.blob();
+  return URL.createObjectURL(videoBlob);
 }
 
-let chatInstance: any | null = null;
-export const startChat = (): any => {
+let chatInstance: Chat | null = null;
+export const startChat = (): Chat => {
   if (!chatInstance) {
     const ai = getAiClient();
-    // create a light-weight chat wrapper that emulates previous behavior
-    const model = ai.getGenerativeModel
-      ? ai.getGenerativeModel({ model: "gemini-2.5-flash" })
-      : (ai as any);
-
-    chatInstance = {
-      send: async (text: string) => {
-        const payload = { contents: [{ role: "user", parts: [{ text }] }] };
-        const response: any = await (model.generateContent
-          ? model.generateContent(payload)
-          : (ai as any).models.generateContent(payload));
-        const out =
-          typeof response.text === "function"
-            ? await response.text()
-            : response.text ??
-              response?.candidates?.[0]?.content?.parts
-                ?.map((p: any) => p.text)
-                .join("\n");
-        return String(out);
+    chatInstance = ai.chats.create({
+      model: "gemini-2.5-flash",
+      config: {
+        systemInstruction:
+          "Você é um assistente especialista em cabelos e beleza, respondendo a perguntas de cabeleireiros profissionais. Seja conciso e informativo.",
       },
-    };
+    });
   }
   return chatInstance;
 };
 
 export async function textToSpeech(text: string) {
   const ai = getAiClient();
-  const model = ai.getGenerativeModel
-    ? ai.getGenerativeModel({ model: "gemini-2.5-flash-preview-tts" })
-    : (ai as any);
-  const payload = {
-    contents: [{ role: "user", parts: [{ text }] }],
-    generationConfig: {
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-preview-tts",
+    contents: [{ parts: [{ text: text }] }],
+    config: {
       responseModalities: ["AUDIO"],
       speechConfig: {
         voiceConfig: {
@@ -990,74 +800,71 @@ export async function textToSpeech(text: string) {
         },
       },
     },
+  });
+
+  const base64Audio =
+    response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!base64Audio) throw new Error("Audio data not found in response.");
+
+  const outputAudioContext = new (window.AudioContext ||
+    window.webkitAudioContext)({ sampleRate: 24000 });
+
+  // Decode and play functions
+  const decode = (base64: string) => {
+    const binaryString = atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
   };
 
-  const response: any = await (model.generateContent
-    ? model.generateContent(payload)
-    : (ai as any).models.generateContent(payload));
+  const decodeAudioData = async (
+    data: Uint8Array,
+    ctx: AudioContext,
+    sampleRate: number,
+    numChannels: number
+  ): Promise<AudioBuffer> => {
+    const dataInt16 = new Int16Array(data.buffer);
+    const frameCount = dataInt16.length / numChannels;
+    const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
-  // try common inlineData path
-  const audioBase64 = response?.candidates?.[0]?.content?.parts?.find(
-    (p: any) => p.inlineData?.data
-  )?.inlineData?.data;
-  if (!audioBase64) {
-    const textResp =
-      typeof response.text === "function"
-        ? await response.text()
-        : response.text;
-    const match =
-      typeof textResp === "string"
-        ? textResp.match(/data:audio\/[^;]+;base64,([A-Za-z0-9+/=]+)/)
-        : null;
-    if (match) {
-      await playBase64Audio(match[1]);
-      return;
+    for (let channel = 0; channel < numChannels; channel++) {
+      const channelData = buffer.getChannelData(channel);
+      for (let i = 0; i < frameCount; i++) {
+        channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+      }
     }
-    throw new Error("Audio data not found in response.");
-  }
-  await playBase64Audio(audioBase64);
-}
+    return buffer;
+  };
 
-async function playBase64Audio(base64: string) {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
-
-  const audioCtx = new (window.AudioContext ||
-    (window as any).webkitAudioContext)({ sampleRate: 24000 });
-  const dataInt16 = new Int16Array(bytes.buffer);
-  const frameCount = dataInt16.length;
-  const buffer = audioCtx.createBuffer(1, frameCount, 24000);
-  const channelData = buffer.getChannelData(0);
-  for (let i = 0; i < frameCount; i++) channelData[i] = dataInt16[i] / 32768;
-  const source = audioCtx.createBufferSource();
-  source.buffer = buffer;
-  source.connect(audioCtx.destination);
+  const audioBuffer = await decodeAudioData(
+    decode(base64Audio),
+    outputAudioContext,
+    24000,
+    1
+  );
+  const source = outputAudioContext.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(outputAudioContext.destination);
   source.start();
 }
 
 export async function findNearbyStores(query: string): Promise<any> {
   const ai = getAiClient();
-  const model = ai.getGenerativeModel
-    ? ai.getGenerativeModel({ model: "gemini-2.5-flash" })
-    : (ai as any);
-  const payload = { contents: [{ role: "user", parts: [{ text: query }] }] };
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: query,
+    config: {
+      tools: [{ googleMaps: {} }],
+    },
+  });
 
-  const response: any = await (model.generateContent
-    ? model.generateContent(payload)
-    : (ai as any).models.generateContent(payload));
   const groundingChunks =
-    response?.candidates?.[0]?.groundingMetadata?.groundingChunks;
-  const text =
-    typeof response.text === "function"
-      ? await response.text()
-      : response.text ??
-        response?.candidates?.[0]?.content?.parts
-          ?.map((p: any) => p.text)
-          .join("\n");
+    response.candidates?.[0]?.groundingMetadata?.groundingChunks;
   return {
-    textResponse: String(text ?? ""),
+    textResponse: response.text,
     mapsData: groundingChunks,
   };
 }
